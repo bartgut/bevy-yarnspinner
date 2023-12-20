@@ -1,0 +1,37 @@
+WHITESPACE      = _{ " " }
+title           = @{ (ASCII_ALPHANUMERIC | "_")+ }
+title_header    = _{ "title:" ~ title ~ NEWLINE }
+position_number = _{ ("-")? ~ (ASCII_DIGIT)+ }
+position        = _{ "position: " ~ position_number ~ "," ~ position_number ~ NEWLINE }
+section_start   = _{ "---" ~ NEWLINE }
+section_end     = _{ "===" ~ NEWLINE }
+speaker         =  { (ASCII_ALPHANUMERIC)+ }
+dialog          =  { (!(if_statement | tags | NEWLINE) ~ ANY)+ }
+
+tag_name  = @{ (ASCII_ALPHANUMERIC)+ }
+tag_value = @{ (!(WHITESPACE | NEWLINE) ~ ANY)+ }
+tags      =  { ("#" ~ tag_name ~ ":" ~ tag_value) }
+
+condition    = { "==" | "!=" }
+if_statement = { "<<if" ~ "$" ~ variable_name ~ condition ~ boolean_value ~ ">>" }
+
+option_dialog_line = { speaker ~ ":" ~ dialog ~ (if_statement)? ~ (tags)* ~ NEWLINE }
+dialog_line        = { speaker ~ ":" ~ dialog ~ (tags)* ~ NEWLINE }
+option_line        = { "->" ~ option_dialog_line ~ jump_line }
+jump_line          = { "<<jump" ~ title ~ ">>" ~ NEWLINE }
+option_lines       = { (option_line)+ }
+
+variable_name = @{ (ASCII_ALPHANUMERIC | "_")+ }
+function_name = @{ (ASCII_ALPHANUMERIC | "_")+ }
+arg           = @{ (ASCII_ALPHANUMERIC | "_")+ }
+args          =  { (arg)* }
+boolean_value =  { "true" | "false" }
+set_line      =  { "<<set" ~ "$" ~ variable_name ~ "to" ~ boolean_value ~ ">>" ~ NEWLINE }
+command_line  =  { "<<" ~ function_name ~ args ~ ">>" ~ NEWLINE }
+
+section_content = { (dialog_line | option_lines | jump_line | set_line | command_line)+ }
+
+section  =  { title_header ~ (position)? ~ section_start ~ (section_content) ~ section_end }
+sections = _{ (section)* }
+
+yarnspinner = _{ SOI ~ sections ~ EOI }
