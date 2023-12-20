@@ -1,0 +1,1 @@
+Yarnspinner asset for Bevy Engine
