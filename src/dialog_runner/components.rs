@@ -46,3 +46,6 @@ pub struct DialogEventBundle {
 
 #[derive(Component)]
 pub struct DialogEventTimer(pub Timer);
+
+#[derive(Component)]
+pub struct CurrentDialogEvent;

@@ -123,7 +123,7 @@ fn parse_tag(content: Pair<Rule>) -> Tag {
 
 fn parse_option_lines(content: Pair<Rule>) -> LineType {
     let mut option_possibilities: Vec<OptionPossibility> = vec![];
-    let speaker = String::new();
+    let speaker = String::from("Player");
 
     for option_lines_field in content.into_inner() {
         match option_lines_field.as_rule() {
