@@ -1,11 +1,15 @@
+use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::sync::{Arc, Mutex, RwLock, Weak};
+
 use bevy::prelude::*;
 use lazy_static::lazy_static;
+
 use crate::dialog_runner::components::{DialogEvent, DialogOption, DialogState};
 use crate::dialog_runner::context::StateContext;
-use crate::parsing::components::{LineType, OptionPossibility, YarnSpinnerNode};
-use std::sync::Mutex;
-use std::collections::HashMap;
+use crate::dialog_runner::dialog_runner_error::DialogRunnerError;
+use crate::dialog_runner::dialog_runner_error::DialogRunnerError::{StartingNodeNotFound, UnknownNodeChosen, WrongState};
+use crate::parsing::components::{ConditionType, LineType, OptionPossibility, YarnSpinnerNode};
 
 pub type CommandFn = Box<dyn Fn(&mut Commands, &mut dyn Iterator<Item = String>) + Send + Sync>;
 lazy_static! {
@@ -13,107 +17,105 @@ lazy_static! {
 }
 
 pub struct DialogRunner<T: StateContext> {
-    nodes: Vec<YarnSpinnerNode>,
-    current_node_index: usize,
+    nodes: Vec<Arc<RwLock<YarnSpinnerNode>>>,
+    current_node: Weak<RwLock<YarnSpinnerNode>>,
     current_line_index: usize,
     dialog_state: DialogState,
     _phantom: PhantomData<T>,
 }
 
 impl<T: StateContext> DialogRunner<T> {
-    pub fn create_from_nodes(nodes: Vec<YarnSpinnerNode>, start_node: &str) -> Self {
-        let current_node_index = nodes
+    pub fn create_from_nodes(nodes: Vec<Arc<RwLock<YarnSpinnerNode>>>, start_node_title: &str) -> Result<Self, DialogRunnerError> {
+        let current_node = nodes
             .iter()
-            .position(|node| node.title == start_node)
-            .expect("No start node found");
-        Self {
+            .find(|node| node.read().unwrap().title == start_node_title)
+            .ok_or(StartingNodeNotFound { node_name: start_node_title.to_string() })?;
+
+        let weak_current_node = Arc::downgrade(current_node);
+
+        Ok(Self {
             nodes,
-            current_node_index: current_node_index,
+            current_node: weak_current_node,
             current_line_index: 0,
             dialog_state: DialogState::Start,
             _phantom: PhantomData,
-        }
+        })
     }
 
     pub fn next_event(&mut self, context: &mut T, commands: &mut Commands) -> DialogEvent {
         match self.dialog_state {
-            DialogState::Start => {
-                self.update_context(context);
-                self.perform_jump();
-                self.execute_command(commands);
-                let event = self.line_to_event(&self.current_line(), context);
-                let new_state = Self::event_to_dialog_state(&event);
-                self.dialog_state = new_state.clone();
-                self.move_pointer();
-                match new_state {
-                    DialogState::Start => self.next_event(context, commands),
-                    _ => event.unwrap(),
-                }
-            }
-            DialogState::Dialog => {
-                self.update_context(context);
-                self.perform_jump();
-                self.execute_command(commands);
-                let event = self.line_to_event(&self.current_line(), context);
-                let new_state = Self::event_to_dialog_state(&event);
-                self.dialog_state = new_state.clone();
-                self.move_pointer();
-                match new_state {
-                    DialogState::Start => self.next_event(context, commands),
-                    _ => event.unwrap(),
-                }
-            }
+            DialogState::Start | DialogState::Dialog => self.handle_dialog(context, commands),
             DialogState::Waiting => DialogEvent::Waiting,
             DialogState::End => DialogEvent::End,
         }
     }
 
-    pub fn make_decision(&mut self, decision: &str) {
+    pub fn make_decision(&mut self, decision: &str) -> Result<(), DialogRunnerError> {
         if let DialogState::Waiting = self.dialog_state {
-            // set used to true
-            if let LineType::OptionLine {
-                speaker: _speaker,
-                possibilities,
-            } = self.current_line_mut()
-            {
-                let mut possibility = possibilities
-                    .iter_mut()
-                    .find(|possibility| possibility.jump_to_node == decision)
-                    .expect("No possibility found");
-                possibility.used = true;
-            }
-
-            self.current_node_index = self
+            self.update_used(decision);
+            self.current_node = Arc::downgrade(self
                 .nodes
                 .iter()
-                .position(|node| node.title == decision)
-                .expect("No node found");
+                .find(|node| node.read().unwrap().title == decision)
+                .ok_or(UnknownNodeChosen { node_name: decision.to_string() })?);
             self.current_line_index = 0;
             self.dialog_state = DialogState::Start;
+            Ok(())
+        } else {
+            Err(WrongState { current: self.dialog_state.clone(), expected: DialogState::Waiting })
         }
     }
 
-    fn current_node(&self) -> &YarnSpinnerNode {
-        self.nodes
-            .get(self.current_node_index)
-            .expect("No current node")
+    pub fn reset_to(&mut self, node_title: &str) -> Result<(), String> {
+        self.current_node = Arc::downgrade(self
+            .nodes
+            .iter()
+            .find(|node| node.read().unwrap().title == node_title)
+            .ok_or("Could not reset to selected node(wrong node title?")?);
+        self.current_line_index = 0;
+        self.dialog_state = DialogState::Start;
+        Ok(())
     }
 
-    fn current_line(&self) -> &LineType {
-        let current_line = self.current_line_index;
-        let current_node_lines = &self.current_node().lines;
-        &current_node_lines[current_line]
+    fn handle_dialog(&mut self, context: &mut T, commands: &mut Commands) -> DialogEvent {
+        self.update_context(context);
+        self.perform_jump();
+        self.execute_command(commands);
+        self.process_event(context, commands)
     }
 
-    fn current_node_mut(&mut self) -> &mut YarnSpinnerNode {
-        self.nodes
-            .get_mut(self.current_node_index)
-            .expect("No current node")
+    fn update_used(&mut self, decision: &str) {
+        let node_arc = self.current_node.upgrade().unwrap();
+        let mut node = node_arc.write().unwrap();
+        let current_line_mut = &mut node.lines[self.current_line_index];
+        if let LineType::OptionLine {
+            speaker: _speaker,
+            possibilities,
+        } = current_line_mut
+        {
+            let possibility = possibilities
+                .iter_mut()
+                .find(|possibility| possibility.jump_to_node_title == decision)
+                .expect("No possibility found");
+            possibility.used = true;
+        }
     }
-    fn current_line_mut(&mut self) -> &mut LineType {
-        let current_line = self.current_line_index;
-        let current_node_lines = &mut self.current_node_mut().lines;
-        &mut current_node_lines[current_line]
+
+    fn process_event(&mut self, context: &mut T, commands: &mut Commands) -> DialogEvent {
+        let event = self.line_to_event(&self.current_line(), context);
+        self.dialog_state = Self::event_to_dialog_state(&event);
+        self.move_pointer();
+        match self.dialog_state {
+            DialogState::Start => self.next_event(context, commands),
+            DialogState::End => DialogEvent::End,
+            _ => event.unwrap(),
+        }
+    }
+
+    fn current_line(&self) -> LineType {
+        let current_node = self.current_node.upgrade().unwrap();
+        let x = current_node.read().unwrap().lines[self.current_line_index].clone();
+        x
     }
 
     fn line_to_event(&self, line: &LineType, context: &T) -> Option<DialogEvent> {
@@ -136,7 +138,7 @@ impl<T: StateContext> DialogRunner<T> {
                     .filter(|&x| self.passes_condition(x, context))
                     .map(|possibility| DialogOption {
                         text: possibility.text.clone(),
-                        node: possibility.jump_to_node.clone(),
+                        node: possibility.jump_to_node_title.clone(),
                         used: possibility.used.clone(),
                     })
                     .collect();
@@ -152,10 +154,9 @@ impl<T: StateContext> DialogRunner<T> {
     fn passes_condition(&self, possibility: &OptionPossibility, context: &T) -> bool {
         match &possibility.condition {
             Some(condition) => match context.get_value(&condition.variable_name) {
-                Some(value) => match condition.condition.as_str() {
-                    "==" => value == &condition.value.parse::<bool>().unwrap(),
-                    "!=" => value != &condition.value.parse::<bool>().unwrap(),
-                    _ => false,
+                Some(value) => match condition.condition {
+                    ConditionType::Equal => value == &condition.value,
+                    ConditionType::NotEqual => value != &condition.value,
                 },
                 None => false,
             },
@@ -174,12 +175,8 @@ impl<T: StateContext> DialogRunner<T> {
     }
 
     fn perform_jump(&mut self) {
-        if let LineType::JumpLine { node_title } = &self.current_line() {
-            self.current_node_index = self
-                .nodes
-                .iter()
-                .position(|node| node.title == *node_title)
-                .expect("No node found");
+        if let LineType::JumpLine { node, node_title} = &self.current_line() {
+            self.current_node = node.clone();
             self.current_line_index = 0;
         }
     }
@@ -198,7 +195,7 @@ impl<T: StateContext> DialogRunner<T> {
             DialogState::Waiting => {}
             _ => {
                 self.current_line_index += 1;
-                if self.current_line_index >= self.current_node().lines.len() {
+                if self.current_line_index >= self.current_node.upgrade().unwrap().read().unwrap().lines.len() {
                     self.dialog_state = DialogState::End;
                 }
             }
@@ -222,13 +219,4 @@ impl<T: StateContext> DialogRunner<T> {
         }
     }
 
-    pub fn reset_to(&mut self, node_title: &str) {
-        self.current_node_index = self
-            .nodes
-            .iter()
-            .position(|node| node.title == node_title)
-            .expect("No node found");
-        self.current_line_index = 0;
-        self.dialog_state = DialogState::Start;
-    }
 }

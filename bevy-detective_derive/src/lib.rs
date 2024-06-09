@@ -1,12 +1,10 @@
 use proc_macro::TokenStream;
+
+use quote::{format_ident, quote};
 use quote::ToTokens;
-use syn::{parse_macro_input, ItemFn, LitStr, AttributeArgs, NestedMeta, FnArg, PatType, Type, Lit};
-use syn::parse::Parser;
-use quote::{quote, format_ident};
-use std::collections::HashMap;
-use std::sync::Mutex;
-use lazy_static::lazy_static;
+use syn::{AttributeArgs, FnArg, ItemFn, Lit, NestedMeta, parse_macro_input, PatType, Type};
 use syn::__private::TokenStream2;
+use syn::parse::Parser;
 
 #[proc_macro_attribute]
 pub fn yarn_command(attr: TokenStream, item: TokenStream) -> TokenStream {

@@ -1,4 +1,5 @@
 WHITESPACE      = _{ " " }
+silent_eoi 		= _{ !ANY }
 title           = @{ (ASCII_ALPHANUMERIC | "_")+ }
 title_header    = _{ "title:" ~ title ~ NEWLINE }
 position_number = _{ ("-")? ~ (ASCII_DIGIT)+ }
@@ -32,6 +33,6 @@ command_line  =  { "<<" ~ function_name ~ args ~ ">>" ~ NEWLINE }
 section_content = { (dialog_line | option_lines | jump_line | set_line | command_line)+ }
 
 section  =  { title_header ~ (position)? ~ section_start ~ (section_content) ~ section_end }
-sections = _{ (section)* }
+sections = _{ (section)+ }
 
-yarnspinner = _{ SOI ~ sections ~ EOI }
+yarnspinner = _{ SOI ~ sections~ silent_eoi }

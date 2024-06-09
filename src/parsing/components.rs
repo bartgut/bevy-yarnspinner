@@ -1,9 +1,33 @@
+use std::str::FromStr;
+use std::sync::{RwLock, Weak};
+use vec1::Vec1;
+
 #[derive(Clone, Debug)]
 pub struct Condition {
     pub variable_name: String,
-    pub condition: String,
-    pub value: String,
+    pub condition: ConditionType,
+    pub value: bool,
 }
+
+#[derive(Clone, Debug)]
+pub enum ConditionType {
+    Equal,
+    NotEqual
+}
+
+impl FromStr for ConditionType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "==" => Ok(ConditionType::Equal),
+            "!=" => Ok(ConditionType::NotEqual),
+            _ => Err(())
+        }
+    }
+}
+
+
 
 #[derive(Clone, Debug)]
 pub struct Tag {
@@ -14,7 +38,8 @@ pub struct Tag {
 #[derive(Clone, Debug)]
 pub struct OptionPossibility {
     pub text: String,
-    pub jump_to_node: String,
+    pub jump_to_node_title: String,
+    pub jump_to_node: Weak<RwLock<YarnSpinnerNode>>,
     pub condition: Option<Condition>,
     pub used: bool,
 }
@@ -36,15 +61,16 @@ pub enum LineType {
     },
     JumpLine {
         node_title: String,
+        node: Weak<RwLock<YarnSpinnerNode>>
     },
     OptionLine {
         speaker: String,
-        possibilities: Vec<OptionPossibility>,
+        possibilities: Vec1<OptionPossibility>,
     },
 }
 
 #[derive(Clone, Debug)]
 pub struct YarnSpinnerNode {
     pub title: String,
-    pub lines: Vec<LineType>,
+    pub lines: Vec1<LineType>,
 }

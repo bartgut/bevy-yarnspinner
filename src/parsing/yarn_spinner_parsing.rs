@@ -1,37 +1,64 @@
+use std::str::FromStr;
+use std::sync::{Arc, RwLock, Weak};
+
+use bevy::utils::HashMap;
 use pest::iterators::Pair;
 use pest::Parser;
 use pest_derive::Parser;
+use vec1::Vec1;
+
+use crate::asset::asset::YarnSpinnerDialogLoaderError;
+use crate::asset::asset::YarnSpinnerDialogLoaderError::{ParsingError, UnknownNode};
+
 use super::components::*;
 
 #[derive(Parser)]
 #[grammar = "assets/grammar/yarnspinner.pest"]
 pub struct YarnSpinnerParser;
 
-pub fn load_from_file(dialog: &str) -> Vec<YarnSpinnerNode> {
-    let parsed = YarnSpinnerParser::parse(Rule::yarnspinner, dialog).expect("unsuccessful parse");
-    parsed.into_iter().map(parse_section).collect()
+pub fn load_from_file(dialog: &str) -> Result<Vec<Arc<RwLock<YarnSpinnerNode>>>, YarnSpinnerDialogLoaderError> {
+    let parsed = YarnSpinnerParser::parse(Rule::yarnspinner, dialog).map_err(|_| ParsingError)?;
+
+    let mut result: HashMap<String, Arc<RwLock<YarnSpinnerNode>>> = parsed.into_iter()
+        .map(parse_section)
+        .map(|node| (node.read().unwrap().title.clone(), node.clone()))
+        .collect();
+
+    for node in result.values() {
+        let mut node_mut= node.write().unwrap();
+        for line in &mut node_mut.lines {
+            if let LineType::JumpLine { node_title, node } = line {
+                *node = Arc::downgrade(result.get(node_title).ok_or(UnknownNode(node_title.to_string()))?)
+            }
+        }
+    }
+    Ok(result.values().map(|x| x.clone()).collect())
 }
 
-fn parse_section(section: Pair<Rule>) -> YarnSpinnerNode {
-    let mut node = YarnSpinnerNode {
-        title: String::new(),
-        lines: vec![],
-    };
+fn parse_section(section: Pair<Rule>) -> Arc<RwLock<YarnSpinnerNode>> {
+    let mut node_title = String::new();
+    let mut lines = vec![];
 
     if section.as_rule() == Rule::section {
         for field in section.into_inner() {
             match field.as_rule() {
-                Rule::title => node.title = field.as_str().to_string(),
-                Rule::section_content => {
-                    for content in field.into_inner() {
-                        node.lines.push(parse_content(content));
-                    }
-                }
+                Rule::title => node_title = field.as_str().to_string(),
+                Rule::section_content => parse_section_content(field, &mut lines),
                 _ => unreachable!(),
             }
         }
     }
-    node
+
+    Arc::new(RwLock::new(YarnSpinnerNode {
+        title: node_title,
+        lines: Vec1::try_from_vec(lines).unwrap() // save, pest parsing requires at least one line per node
+    }))
+}
+
+fn parse_section_content(field: Pair<Rule>, lines: &mut Vec<LineType>) {
+    for content in field.into_inner() {
+        lines.push(parse_content(content));
+    }
 }
 
 fn parse_content(content: Pair<Rule>) -> LineType {
@@ -52,7 +79,7 @@ fn parse_set_line(content: Pair<Rule>) -> LineType {
     for set_line_field in content.into_inner() {
         match set_line_field.as_rule() {
             Rule::variable_name => variable_name = set_line_field.as_str().to_string(),
-            Rule::boolean_value => value = set_line_field.as_str().parse::<bool>().unwrap(),
+            Rule::boolean_value => value = set_line_field.as_str().parse::<bool>().unwrap(), // safe
             _ => unreachable!(),
         }
     }
@@ -162,7 +189,8 @@ fn parse_option_lines(content: Pair<Rule>) -> LineType {
 
                 option_possibilities.push(OptionPossibility {
                     text,
-                    jump_to_node: node_title,
+                    jump_to_node_title: node_title,
+                    jump_to_node: Weak::<RwLock<YarnSpinnerNode>>::new(),
                     condition,
                     used: false,
                 });
@@ -173,26 +201,26 @@ fn parse_option_lines(content: Pair<Rule>) -> LineType {
 
     LineType::OptionLine {
         speaker,
-        possibilities: option_possibilities,
+        possibilities: Vec1::try_from_vec(option_possibilities).unwrap(), // safe as pest requires at least one possibility
     }
 }
 
 fn parse_if_statement(dialog_line_field: Pair<Rule>) -> Condition {
     let mut variable_name = String::new();
     let mut condition_sign = String::new();
-    let mut value = String::new();
+    let mut value = false;
 
     for if_statement_field in dialog_line_field.into_inner() {
         match if_statement_field.as_rule() {
             Rule::variable_name => variable_name = if_statement_field.as_str().to_string(),
             Rule::condition => condition_sign = if_statement_field.as_str().to_string(),
-            Rule::boolean_value => value = if_statement_field.as_str().to_string(),
+            Rule::boolean_value => value = if_statement_field.as_str().to_string().parse::<bool>().unwrap(), // safe as boolean_value contains either 'true' or 'false'
             _ => unreachable!(),
         }
     }
     Condition {
         variable_name,
-        condition: condition_sign,
+        condition: ConditionType::from_str(condition_sign.as_str()).expect("Wrong condition sign"),
         value,
     }
 }
@@ -206,5 +234,5 @@ fn parse_jump_line(content: Pair<Rule>) -> LineType {
         })
         .expect("Jump line missing title");
 
-    LineType::JumpLine { node_title }
+    LineType::JumpLine { node: Weak::<RwLock<YarnSpinnerNode>>::new(), node_title: node_title }
 }

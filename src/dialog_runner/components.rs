@@ -1,6 +1,7 @@
+use std::fmt::{Display, Formatter};
 use bevy::prelude::{Bundle, Component};
 use bevy::time::Timer;
-use crate::parsing::components::Tag;
+use crate::parsing::components::{Tag};
 
 #[derive(Clone, Debug)]
 pub enum DialogState {
@@ -8,6 +9,17 @@ pub enum DialogState {
     Dialog,
     Waiting,
     End,
+}
+
+impl Display for DialogState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DialogState::Start => write!(f, "Start"),
+            DialogState::Dialog => write!(f, "Dialog"),
+            DialogState::Waiting => write!(f, "Waiting"),
+            DialogState::End => write!(f, "End")
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -11,4 +11,5 @@ pest = "2.7.5"
 pest_derive = "2.7.5"
 thiserror = "1.0.51"
 lazy_static = "1.4.0"
+vec1 = "1.12.1"
 bevy-detective_derive = { path = "bevy-detective_derive" }
