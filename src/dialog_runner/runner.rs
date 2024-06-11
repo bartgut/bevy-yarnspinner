@@ -66,12 +66,12 @@ impl<T: StateContext> DialogRunner<T> {
         }
     }
 
-    pub fn reset_to(&mut self, node_title: &str) -> Result<(), String> {
+    pub fn reset_to(&mut self, node_title: &str) -> Result<(), DialogRunnerError> {
         self.current_node = Arc::downgrade(self
             .nodes
             .iter()
             .find(|node| node.read().unwrap().title == node_title)
-            .ok_or("Could not reset to selected node(wrong node title?")?);
+            .ok_or(UnknownNodeChosen { node_name: node_title.to_string() })?);
         self.current_line_index = 0;
         self.dialog_state = DialogState::Start;
         Ok(())

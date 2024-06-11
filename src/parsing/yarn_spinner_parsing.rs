@@ -17,7 +17,8 @@ use super::components::*;
 pub struct YarnSpinnerParser;
 
 pub fn load_from_file(dialog: &str) -> Result<Vec<Arc<RwLock<YarnSpinnerNode>>>, YarnSpinnerDialogLoaderError> {
-    let parsed = YarnSpinnerParser::parse(Rule::yarnspinner, dialog).map_err(|_| ParsingError)?;
+    let parsed = YarnSpinnerParser::parse(Rule::yarnspinner, dialog)
+        .map_err(|errors| ParsingError(errors))?;
 
     let mut result: HashMap<String, Arc<RwLock<YarnSpinnerNode>>> = parsed.into_iter()
         .map(parse_section)

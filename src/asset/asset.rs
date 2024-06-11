@@ -6,6 +6,7 @@ use thiserror::Error;
 use crate::asset::asset::YarnSpinnerDialogLoaderError::Io;
 use crate::parsing::components::YarnSpinnerNode;
 use crate::parsing::yarn_spinner_parsing;
+use crate::parsing::yarn_spinner_parsing::Rule;
 
 #[derive(Asset, TypePath, Debug)]
 pub struct YarnSpinnerDialog {
@@ -20,9 +21,9 @@ pub struct YarnSpinnerDialogLoader;
 pub enum YarnSpinnerDialogLoaderError {
     #[error("Could not load asset: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Parsing error")]
-    ParsingError,
-    #[error("Unkown node in jump_line: {0}")]
+    #[error("Parsing error: {0}")]
+    ParsingError(pest::error::Error<Rule>),
+    #[error("Unknown node in jump_line: {0}")]
     UnknownNode(String)
 }
 
