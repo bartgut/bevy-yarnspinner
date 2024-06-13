@@ -114,8 +114,8 @@ impl<T: StateContext> DialogRunner<T> {
 
     fn current_line(&self) -> LineType {
         let current_node = self.current_node.upgrade().unwrap();
-        let x = current_node.read().unwrap().lines[self.current_line_index].clone();
-        x
+        let current_line = current_node.read().unwrap().lines[self.current_line_index].clone();
+        current_line
     }
 
     fn line_to_event(&self, line: &LineType, context: &T) -> Option<DialogEvent> {
